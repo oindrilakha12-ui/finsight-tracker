@@ -1,0 +1,309 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FinSight Tracker - Tests</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 800px;
+            margin: 2rem auto;
+            padding: 2rem;
+            background: #f8fafc;
+        }
+        h1 {
+            color: #1e293b;
+        }
+        .test-section {
+            background: white;
+            padding: 1.5rem;
+            margin-bottom: 1rem;
+            border-radius: 0.5rem;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        .test-case {
+            padding: 0.75rem;
+            margin: 0.5rem 0;
+            border-left: 4px solid #94a3b8;
+            background: #f8fafc;
+        }
+        .test-case.pass {
+            border-left-color: #10b981;
+            background: #d1fae5;
+        }
+        .test-case.fail {
+            border-left-color: #ef4444;
+            background: #fee2e2;
+        }
+        .test-name {
+            font-weight: 600;
+            margin-bottom: 0.25rem;
+        }
+        .test-result {
+            font-size: 0.875rem;
+            color: #64748b;
+        }
+        button {
+            background: #4f46e5;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 1rem;
+        }
+        button:hover {
+            background: #4338ca;
+        }
+        .summary {
+            font-size: 1.25rem;
+            font-weight: 600;
+            margin-top: 1rem;
+        }
+        .summary.pass {
+            color: #10b981;
+        }
+        .summary.fail {
+            color: #ef4444;
+        }
+    </style>
+</head>
+<body>
+    <h1>🧪 FinSight Tracker - Test Suite</h1>
+    <p>Simple test harness for core functionality</p>
+    
+    <button id="runTests">Run All Tests</button>
+    
+    <div id="testResults"></div>
+
+    <script type="module">
+        import { initDB, putRecord, getRecord, deleteRecord, getAllRecords } from './assets/js/db.js';
+        import { debounce, formatCurrency, calculatePercentage } from './assets/js/utils.js';
+
+        const results = [];
+
+        function addResult(name, passed, message = '') {
+            results.push({ name, passed, message });
+        }
+
+        function renderResults() {
+            const container = document.getElementById('testResults');
+            const passed = results.filter(r => r.passed).length;
+            const total = results.length;
+            
+            let html = '';
+            
+            // Group by section
+            const sections = {
+                'Database Operations': [],
+                'Utility Functions': [],
+                'Password Security': [],
+                'Transaction Operations': []
+            };
+            
+            results.forEach(r => {
+                if (r.name.includes('DB') || r.name.includes('IndexedDB')) {
+                    sections['Database Operations'].push(r);
+                } else if (r.name.includes('debounce') || r.name.includes('format') || r.name.includes('calculate')) {
+                    sections['Utility Functions'].push(r);
+                } else if (r.name.includes('password') || r.name.includes('hash')) {
+                    sections['Password Security'].push(r);
+                } else {
+                    sections['Transaction Operations'].push(r);
+                }
+            });
+            
+            Object.entries(sections).forEach(([section, tests]) => {
+                if (tests.length > 0) {
+                    html += `<div class="test-section"><h3>${section}</h3>`;
+                    tests.forEach(test => {
+                        html += `
+                            <div class="test-case ${test.passed ? 'pass' : 'fail'}">
+                                <div class="test-name">${test.passed ? '✅' : '❌'} ${test.name}</div>
+                                ${test.message ? `<div class="test-result">${test.message}</div>` : ''}
+                            </div>
+                        `;
+                    });
+                    html += '</div>';
+                }
+            });
+            
+            html += `<div class="summary ${passed === total ? 'pass' : 'fail'}">
+                ${passed} / ${total} tests passed
+            </div>`;
+            
+            container.innerHTML = html;
+        }
+
+        async function runTests() {
+            results.length = 0;
+            document.getElementById('testResults').innerHTML = '<p>Running tests...</p>';
+            
+            try {
+                // Test 1: IndexedDB initialization
+                try {
+                    await initDB();
+                    addResult('IndexedDB initialization', true, 'Database opened successfully');
+                } catch (error) {
+                    addResult('IndexedDB initialization', false, error.message);
+                }
+                
+                // Test 2: Add record to DB
+                try {
+                    const testUser = {
+                        username: 'testuser_' + Date.now(),
+                        salt: 'testsalt',
+                        passwordHash: 'testhash',
+                        createdAt: new Date().toISOString()
+                    };
+                    await putRecord('users', testUser);
+                    addResult('DB: Add record', true, 'User record added');
+                } catch (error) {
+                    addResult('DB: Add record', false, error.message);
+                }
+                
+                // Test 3: Retrieve record from DB
+                try {
+                    const testUsername = 'testuser_retrieve';
+                    const testUser = {
+                        username: testUsername,
+                        salt: 'testsalt',
+                        passwordHash: 'testhash'
+                    };
+                    await putRecord('users', testUser);
+                    const retrieved = await getRecord('users', testUsername);
+                    
+                    if (retrieved && retrieved.username === testUsername) {
+                        addResult('DB: Retrieve record', true, 'Record retrieved successfully');
+                    } else {
+                        addResult('DB: Retrieve record', false, 'Retrieved data mismatch');
+                    }
+                } catch (error) {
+                    addResult('DB: Retrieve record', false, error.message);
+                }
+                
+                // Test 4: Delete record from DB
+                try {
+                    const testUsername = 'testuser_delete';
+                    await putRecord('users', { username: testUsername, salt: 'test', passwordHash: 'test' });
+                    await deleteRecord('users', testUsername);
+                    const deleted = await getRecord('users', testUsername);
+                    
+                    if (!deleted) {
+                        addResult('DB: Delete record', true, 'Record deleted successfully');
+                    } else {
+                        addResult('DB: Delete record', false, 'Record still exists');
+                    }
+                } catch (error) {
+                    addResult('DB: Delete record', false, error.message);
+                }
+                
+                // Test 5: Debounce function
+                try {
+                    let callCount = 0;
+                    const debouncedFn = debounce(() => callCount++, 100);
+                    
+                    debouncedFn();
+                    debouncedFn();
+                    debouncedFn();
+                    
+                    await new Promise(resolve => setTimeout(resolve, 150));
+                    
+                    if (callCount === 1) {
+                        addResult('Utility: debounce function', true, 'Debounce works correctly');
+                    } else {
+                        addResult('Utility: debounce function', false, `Expected 1 call, got ${callCount}`);
+                    }
+                } catch (error) {
+                    addResult('Utility: debounce function', false, error.message);
+                }
+                
+                // Test 6: Format currency
+                try {
+                    const formatted = formatCurrency(1234.56, 'INR');
+                    if (formatted === '₹1234.56') {
+                        addResult('Utility: formatCurrency', true, 'Currency formatted correctly');
+                    } else {
+                        addResult('Utility: formatCurrency', false, `Expected ₹1234.56, got ${formatted}`);
+                    }
+                } catch (error) {
+                    addResult('Utility: formatCurrency', false, error.message);
+                }
+                
+                // Test 7: Calculate percentage
+                try {
+                    const percentage = calculatePercentage(25, 100);
+                    if (percentage === 25) {
+                        addResult('Utility: calculatePercentage', true, 'Percentage calculated correctly');
+                    } else {
+                        addResult('Utility: calculatePercentage', false, `Expected 25, got ${percentage}`);
+                    }
+                } catch (error) {
+                    addResult('Utility: calculatePercentage', false, error.message);
+                }
+                
+                // Test 8: Web Crypto API availability
+                try {
+                    if (window.crypto && window.crypto.subtle) {
+                        addResult('Password: Web Crypto API available', true, 'Can use PBKDF2 for password hashing');
+                    } else {
+                        addResult('Password: Web Crypto API available', false, 'Web Crypto API not supported');
+                    }
+                } catch (error) {
+                    addResult('Password: Web Crypto API available', false, error.message);
+                }
+                
+                // Test 9: Random salt generation
+                try {
+                    const salt1 = window.crypto.getRandomValues(new Uint8Array(16));
+                    const salt2 = window.crypto.getRandomValues(new Uint8Array(16));
+                    
+                    const same = salt1.every((val, idx) => val === salt2[idx]);
+                    
+                    if (!same) {
+                        addResult('Password: Random salt generation', true, 'Salts are unique');
+                    } else {
+                        addResult('Password: Random salt generation', false, 'Salts are identical');
+                    }
+                } catch (error) {
+                    addResult('Password: Random salt generation', false, error.message);
+                }
+                
+                // Test 10: Transaction data structure
+                try {
+                    const transaction = {
+                        username: 'testuser',
+                        type: 'expense',
+                        category: 'food',
+                        amount: 100.50,
+                        date: '2024-01-01',
+                        time: '12:00',
+                        note: 'Test transaction'
+                    };
+                    
+                    const id = await putRecord('transactions', transaction);
+                    
+                    if (id) {
+                        addResult('Transaction: Add transaction', true, 'Transaction added with ID: ' + id);
+                    } else {
+                        addResult('Transaction: Add transaction', false, 'No ID returned');
+                    }
+                } catch (error) {
+                    addResult('Transaction: Add transaction', false, error.message);
+                }
+                
+            } catch (error) {
+                addResult('Test Suite', false, 'Fatal error: ' + error.message);
+            }
+            
+            renderResults();
+        }
+
+        document.getElementById('runTests').addEventListener('click', runTests);
+        
+        // Auto-run on load
+        runTests();
+    </script>
+</body>
+</html>
